@@ -1,84 +1,27 @@
-from fastapi import FastAPI, HTTPException
-from jsonschema import validate
+from fastapi import FastAPI, HTTPException, Path
 from jsonschema.exceptions import ValidationError
+from schema import pokemon_schema, species_schema
 from json import JSONDecodeError, loads
+from jsonschema import validate
 import uvicorn
 import httpx
 
 app = FastAPI()
 
-# TODO: Put schema in a seprarate file
-# jsonschema for validation. See: https://json-schema.org/specification.html
-pokemon_schema = {
-    "type" : "object",
-    "properties": {
-        "id" : {"type" : "number"},
-        "name" : { "type":"string"},
-        "types" : { "type":"array", 
-                    "minItems":1,
-                    "items":{
-                        "type":"object",
-                        "properties":{
-                                        "type" : {
-                                            "type": "object", 
-                                            "properties": {
-                                                "url":{"type": "string"}
-                                            },
-                                            "required":["url"]
-                                        }
-                                            
-                                     },
-                        "required":["type"]
-                    }
-                },
-        "sprites" : { 
-            "type" : "object",
-            "properties" : {
-                "front_default" : {"type" : "string"}
-            },
-            "required" : ["front_default"]
-        },
-        "species":{
-            "type" : "object",
-            "properties" : {
-                "name" : {"type" : "string"},
-                "url" : {"type" : "string"}
-            },
-            "required" : ["name","url"]
-        }
-    },
-    "required":["name","types","id","sprites","species"]
-}
-
-species_schema = {
-    "type" : "object",
-    "properties": {
-        "flavor_text_entries":{
-            "type" : "array",
-            "minItems": 1,
-            "items" : {
-                "type" : "object",
-                "properties":{
-                    "flavor_text":{"type":"string"}
-                },
-                "required" : ["flavor_text"]
-            }
-        }
-    },
-    "required":["flavor_text_entries"]
-}
-# Pass id to pokeAPI 
+# Pokemon ID for pokeAPI.
 @app.get("/{id}")
-async def root(id):
+async def root(id: int = Path(title="Pokemon ID for pokeAPI")):
     async with httpx.AsyncClient() as client:
         try:
-            # Fetch pokemon data:
+            # Fetch pokemon: TODO: avoid hardcoded urls
             response = await client.get("https://pokeapi.co/api/v2/pokemon/{id}".format(id=id))
             pokemon = loads(response.text)
+            # Validate jsonschema. See schema.py
             validate(instance=pokemon, schema=pokemon_schema)
             # Fetch flavor:
             response = await client.get(pokemon["species"]["url"])
             species = loads(response.text)
+            # Validate jsonschema. See schema.py
             validate(instance=species, schema=species_schema)
         except httpx.RequestError:
             raise HTTPException(status_code=400, detail="Could not fetch from PokeAPI")
@@ -89,13 +32,14 @@ async def root(id):
         except Exception as e:
             raise HTTPException(status_code=400, detail="Prepare for trouble, make it double! Meow, that's right!")
         
-        
+        # Pick only the attributes we care about
         result = {
             "id" : pokemon["id"],
             "name" : pokemon["name"],
             "image" : pokemon["sprites"]["front_default"],
             "type" : pokemon["types"][0]["type"]["name"], # Wasn't required but i think it's important.
             # I chose to show "blue" descriptions but in the future this can be changed
+            # TODO: make sure language is "en"
             "flavor_text": species["flavor_text_entries"][0]["flavor_text"]
         }
         return result
